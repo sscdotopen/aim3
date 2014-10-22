@@ -18,9 +18,11 @@
 
 package de.tuberlin.dima.aim3.assignment1;
 
+import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
+import com.google.common.io.Files;
 import de.tuberlin.dima.aim3.HadoopTestCase;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.util.Tool;
@@ -80,7 +82,7 @@ public class BookAndAuthorJoinTest extends HadoopTestCase {
     Multimap<String,Book> booksByAuthors = HashMultimap.create();
 
     Pattern separator = Pattern.compile("\t");
-    for (String line : new FileLineIterable(outputFile)) {
+    for (String line : Files.readLines(outputFile, Charsets.UTF_8)) {
       String[] tokens = separator.split(line);
       booksByAuthors.put(tokens[0], new Book(tokens[1], Integer.parseInt(tokens[2])));
     }

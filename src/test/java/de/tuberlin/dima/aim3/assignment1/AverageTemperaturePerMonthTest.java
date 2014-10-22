@@ -18,7 +18,9 @@
 
 package de.tuberlin.dima.aim3.assignment1;
 
+import com.google.common.base.Charsets;
 import com.google.common.collect.Maps;
+import com.google.common.io.Files;
 import de.tuberlin.dima.aim3.HadoopTestCase;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.mahout.common.iterator.FileLineIterable;
@@ -88,7 +90,7 @@ public class AverageTemperaturePerMonthTest extends HadoopTestCase {
   private Map<YearAndMonth,Double> readResults(File outputFile) throws IOException {
     Pattern separator = Pattern.compile("\t");
     Map<YearAndMonth,Double> averageTemperatures = Maps.newHashMap();
-    for (String line : new FileLineIterable(outputFile)) {
+    for (String line : Files.readLines(outputFile, Charsets.UTF_8)) {
       String[] tokens = separator.split(line);
       int year = Integer.parseInt(tokens[0]);
       int month = Integer.parseInt(tokens[1]);

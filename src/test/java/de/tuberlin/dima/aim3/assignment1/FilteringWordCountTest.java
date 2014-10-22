@@ -18,7 +18,9 @@
 
 package de.tuberlin.dima.aim3.assignment1;
 
+import com.google.common.base.Charsets;
 import com.google.common.collect.Maps;
+import com.google.common.io.Files;
 import de.tuberlin.dima.aim3.HadoopTestCase;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.mahout.common.iterator.FileLineIterable;
@@ -65,7 +67,7 @@ public class FilteringWordCountTest extends HadoopTestCase {
 
   protected Map<String,Integer> getCounts(File outputFile) throws IOException {
     Map<String,Integer> counts = Maps.newHashMap();
-    for (String line : new FileLineIterable(outputFile)) {
+    for (String line: Files.readLines(outputFile, Charsets.UTF_8)) {
       String[] tokens = line.split("\t");
       counts.put(tokens[0], Integer.parseInt(tokens[1]));
     }
