@@ -18,24 +18,112 @@
 
 package de.tuberlin.dima.aim3.assignment1;
 
-import de.tuberlin.dima.aim3.HadoopJob;
-import org.apache.hadoop.fs.Path;
-
+import java.io.IOException;
+import java.util.Iterator;
 import java.util.Map;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Partitioner;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.MultipleInputs;
+import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+import de.tuberlin.dima.aim3.HadoopJob;
+import de.tuberlin.dima.aim3.assignment1.TextPair.NaturalkeyComparator;
 
 public class BookAndAuthorReduceSideJoin extends HadoopJob {
 
-  @Override
-  public int run(String[] args) throws Exception {
+	@Override
+	public int run(String[] args) throws Exception {
 
-    Map<String,String> parsedArgs = parseArgs(args);
+		Configuration conf = getConf();
 
-    Path authors = new Path(parsedArgs.get("--authors"));
-    Path books = new Path(parsedArgs.get("--books"));
-    Path outputPath = new Path(parsedArgs.get("--output"));
+		Map<String, String> parsedArgs = parseArgs(args);
 
-    // IMPLEMENT ME
+		Path authors = new Path(parsedArgs.get("--authors"));
+		Path books = new Path(parsedArgs.get("--books"));
+		Path outputPath = new Path(parsedArgs.get("--output"));
 
-    return 0;
-  }
+		Job job = new Job(conf, "Reduce-side join");
+		job.setJarByClass(getClass());
+
+		MultipleInputs.addInputPath(job, books, TextInputFormat.class,
+				BooksMapper.class);
+		MultipleInputs.addInputPath(job, authors, TextInputFormat.class,
+				AuthorsMapper.class);
+		FileOutputFormat.setOutputPath(job, outputPath);
+
+		//secondary sort
+		job.setPartitionerClass(KeyPartitioner.class);
+		job.setGroupingComparatorClass(NaturalkeyComparator.class);
+
+		job.setMapOutputKeyClass(TextPair.class);
+
+		job.setReducerClass(JoinReducer.class);
+
+		job.setOutputKeyClass(Text.class);
+
+		job.waitForCompletion(true);
+
+		return 0;
+	}
+
+	public static class AuthorsMapper extends
+			Mapper<LongWritable, Text, TextPair, Text> {
+		//TextPair: composite key(authorId, filename) for secondary sort 		
+		@Override
+		protected void map(LongWritable key, Text value, Context context)
+				throws InterruptedException, IOException {
+			String record = value.toString();
+			String[] parts = record.split("\t");
+			//tag the file source
+			context.write(new TextPair(parts[0], "authors"), new Text(parts[1]));
+		}
+	}
+
+	public static class BooksMapper extends
+			Mapper<LongWritable, Text, TextPair, Text> {
+		//TextPair: composite key(authorId, filename) for secondary sort 		
+		@Override
+		protected void map(LongWritable key, Text value, Context context)
+				throws InterruptedException, IOException {
+
+			String record = value.toString();
+			String[] parts = record.split("\t");
+			//tag the file source
+			context.write(new TextPair(parts[0], "books"), new Text(parts[2] + "\t"
+					+ parts[1]));
+		}
+	}
+
+	public static class JoinReducer extends Reducer<TextPair, Text, Text, Text> {
+		//TextPair: composite key(authorId, filename) for secondary sort 		
+		@Override
+		protected void reduce(TextPair key, Iterable<Text> values,
+				Context context) throws InterruptedException, IOException {
+			Iterator<Text> iter = values.iterator();
+			Text authorName = new Text(iter.next());
+			while (iter.hasNext()) {
+				Text record = iter.next();
+				Text outValue = new Text(record.toString());
+				context.write(authorName, outValue);
+			}
+		}
+	}
+
+	//partitions on the natural key only
+	public static class KeyPartitioner extends Partitioner<TextPair, Text> {
+		@Override
+		public int getPartition(TextPair key, Text value,
+				int numPartitions) {			
+			return (key.getNaturalKey().hashCode()& Integer.MAX_VALUE)
+					% numPartitions;
+		}
+	}
 }
