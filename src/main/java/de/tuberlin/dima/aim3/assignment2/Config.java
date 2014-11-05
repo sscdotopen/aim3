@@ -1,7 +1,6 @@
 /**
- * Graph-Mining Tutorial for Ozone
- *
- * Copyright (C) 2013  Sebastian Schelter <ssc@apache.org>
+ * AIM3 - Scalable Data Mining -  course work
+ * Copyright (C) 2014  Sebastian Schelter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,10 +21,6 @@ package de.tuberlin.dima.aim3.assignment2;
 public class Config {
 
   private Config() {}
-
-  public static int numberOfSubtasks() {
-    return 2;
-  }
 
   public static String pathToSlashdotZoo() {
     return "/home/ssc/Downloads/out.matrix";

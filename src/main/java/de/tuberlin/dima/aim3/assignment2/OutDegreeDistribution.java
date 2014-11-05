@@ -1,7 +1,6 @@
 /**
- * Graph-Mining Tutorial for Ozone
- *
- * Copyright (C) 2013  Sebastian Schelter <ssc@apache.org>
+ * AIM3 - Scalable Data Mining -  course work
+ * Copyright (C) 2014  Sebastian Schelter
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,7 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package de.tuberlin.dima.aim3.assignment2.statistics;
+package de.tuberlin.dima.aim3.assignment2;
 
 import com.google.common.collect.Iterables;
 import de.tuberlin.dima.aim3.assignment2.Config;
@@ -89,8 +88,8 @@ public class OutDegreeDistribution {
 
   public static class CountVertices implements GroupReduceFunction<Tuple1<Long>, Long> {
     @Override
-    public void reduce(Iterable<Tuple1<Long>> edges, Collector<Long> collector) throws Exception {
-      collector.collect(new Long(Iterables.size(edges)));
+    public void reduce(Iterable<Tuple1<Long>> vertices, Collector<Long> collector) throws Exception {
+      collector.collect(new Long(Iterables.size(vertices)));
     }
   }
 
