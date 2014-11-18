@@ -17,6 +17,9 @@
  */
 
 // WriteUtils and length of the array
+/* WritableUtils is a Hadoop helper class that contains
+numerous methods to make working with Writable
+classes easier*/
 
 package de.tuberlin.dima.aim3.assignment1;
 
@@ -50,6 +53,9 @@ public class PrimeNumbersWritable implements Writable {
 		//write the length for read
 		WritableUtils.writeVInt(out, end - begin);
 		for (int i = begin; i < end; i++) {
+			/*Write out the fields of this
+			Writable in byte form to the
+			output stream.*/
 			WritableUtils.writeVInt(out, numbers[i]);
 		}
 
@@ -60,6 +66,11 @@ public class PrimeNumbersWritable implements Writable {
 		//read the lengh from write
 		numbers = new int[WritableUtils.readVInt(in)];
 		for (int i = 0; i < numbers.length; i++) {
+			/*Read the fields from byte form into
+			the Writable fields. Note that this
+			method reads fields in the same
+			order as they were written in the
+			write method.*/
 			numbers[i] = WritableUtils.readVInt(in);
 		}		
 	}
