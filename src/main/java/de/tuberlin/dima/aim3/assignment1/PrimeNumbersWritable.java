@@ -16,6 +16,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// WriteUtils and length of the array
+
 package de.tuberlin.dima.aim3.assignment1;
 
 import org.apache.hadoop.io.Writable;
