@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// stopwords, clean
 package de.tuberlin.dima.aim3.assignment1;
 
 import de.tuberlin.dima.aim3.HadoopJob;
