@@ -31,7 +31,7 @@ public class PrimeNumbersWritable implements Writable {
 	private int[] numbers;
 	// begin of current range
 	private int begin = 0;
-	// end of current range (exclusive)
+	// end of current range 
 	private int end = 0;
 
 	public PrimeNumbersWritable() {
