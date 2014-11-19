@@ -80,6 +80,7 @@ public class FilteringWordCount extends HadoopJob {
 
 			while (tokenizer.hasMoreTokens()) {
 				word.set(tokenizer.nextToken());
+				// because of hasSet, it performs quicker than list
 				if (stopWords.contains(word.toString())) {
 					continue;
 				}
