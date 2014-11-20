@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// stopwords, clean
 package de.tuberlin.dima.aim3.assignment1;
 
 import de.tuberlin.dima.aim3.HadoopJob;
@@ -79,6 +80,7 @@ public class FilteringWordCount extends HadoopJob {
 
 			while (tokenizer.hasMoreTokens()) {
 				word.set(tokenizer.nextToken());
+				// because of hasSet, it performs quicker than list
 				if (stopWords.contains(word.toString())) {
 					continue;
 				}
