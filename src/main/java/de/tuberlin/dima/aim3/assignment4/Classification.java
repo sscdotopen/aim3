@@ -1,6 +1,6 @@
 /**
  * AIM3 - Scalable Data Mining -  course work
- * Copyright (C) 2014  Sebastian Schelter
+ * Copyright (C) 2014  Sebastian Schelter, Christoph Boden
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
