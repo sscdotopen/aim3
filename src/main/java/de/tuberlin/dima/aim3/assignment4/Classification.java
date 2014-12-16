@@ -83,30 +83,7 @@ public class Classification {
      public void open(Configuration parameters) throws Exception {
        super.open(parameters);
 
-       Iterable<Tuple3<String, String, Long>> myConditionals = getRuntimeContext().getBroadcastVariable("conditionals");
-       Iterable<Tuple2<String, Long>> mySums = getRuntimeContext().getBroadcastVariable("sums");
-
-       for (Tuple2<String, Long> value : mySums) {
-         wordSums.put(value.f0, value.f1);
-       }
-
-       for (String label: wordSums.keySet()) {
-         wordCounts.put(label, Maps.<String, Long>newHashMap());
-       }
-
-       for (Tuple3<String, String, Long> value : myConditionals) {
-         wordCounts.get(value.f0).put(value.f1, value.f2);
-       }
-     }
-
-     private double getWordProbability(String term, String documentLabel){
-       long count = 0;
-       if (wordCounts.get(documentLabel).containsKey(term)) {
-         count = wordCounts.get(documentLabel).get(term);
-       }
-
-       return (double) (count + Config.getSmoothingParameter()) / (double) (wordSums.get(documentLabel) +
-             Config.getSmoothingParameter() * wordSums.keySet().size());
+       // IMPLEMENT ME
      }
 
      @Override
@@ -117,23 +94,11 @@ public class Classification {
        String[] terms = tokens[1].split(",");
 
        double maxProbability = Double.NEGATIVE_INFINITY;
-       String argMaxLabel = "";
+       String predictionLabel = "";
 
-       for (String currentLabel : wordCounts.keySet()) {
+       // IMPLEMENT ME
 
-         double currentProbability = 0.0;
-         for (String term: terms) {
-           currentProbability += Math.log(getWordProbability(term, currentLabel));
-         }
-
-         // we assume a uniform prior which can be ignored for the argmax computation
-         if (maxProbability <= currentProbability){
-           maxProbability = currentProbability;
-           argMaxLabel = currentLabel;
-         }
-       }
-
-       return new Tuple3<String, String, Double>(label, argMaxLabel, maxProbability);
+       return new Tuple3<String, String, Double>(label, predictionLabel, maxProbability);
      }
    }
 
