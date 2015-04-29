@@ -23,7 +23,6 @@ import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 import de.tuberlin.dima.aim3.HadoopTestCase;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.mahout.common.iterator.FileLineIterable;
 import org.junit.Test;
 
 import java.io.File;
@@ -50,15 +49,15 @@ public class AverageTemperaturePerMonthTest extends HadoopTestCase {
     AverageTemperaturePerMonth averageTemperaturePerMonth = new AverageTemperaturePerMonth();
     averageTemperaturePerMonth.setConf(conf);
 
-    averageTemperaturePerMonth.run(new String[] { "--input", inputFile.getAbsolutePath(),
-        "--output", outputDir.getAbsolutePath(), "--minimumQuality", String.valueOf(minimumQuality) });
+    averageTemperaturePerMonth.run(new String[]{"--input", inputFile.getAbsolutePath(),
+            "--output", outputDir.getAbsolutePath(), "--minimumQuality", String.valueOf(minimumQuality)});
 
 
     Map<YearAndMonth, Double> results = readResults(new File(outputDir, "part-r-00000"));
 
-    assertEquals(results.get(new YearAndMonth(1990, 8)), 8, EPSILON);
-    assertEquals(results.get(new YearAndMonth(1992, 4)), 7.888d, EPSILON);
-    assertEquals(results.get(new YearAndMonth(1994, 1)), 8.24, EPSILON);
+    assertEquals(8, results.get(new YearAndMonth(1990, 8)), EPSILON);
+    assertEquals(7.888d, results.get(new YearAndMonth(1992, 4)), EPSILON);
+    assertEquals(8.24, results.get(new YearAndMonth(1994, 1)), EPSILON);
   }
 
 
