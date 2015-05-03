@@ -39,12 +39,31 @@ public class PrimeNumbersWritable implements Writable {
 
   @Override
   public void write(DataOutput out) throws IOException {
-    //IMPLEMENT ME
+    // create a comma separated list of all integer in array
+    StringBuffer sb = new StringBuffer();
+    String separator = "";
+    for(int n: numbers) {
+      sb.append(separator);
+      sb.append(n);
+      separator = ",";
+    }
+    // append newline to read back as line
+    sb.append("\n");
+    // write the string as bytes
+    out.write(sb.toString().getBytes());
   }
 
   @Override
   public void readFields(DataInput in) throws IOException {
-    //IMPLEMENT ME
+    // read the line of comma separated integer
+    String line = in.readLine();
+    // split by the separator
+    String[] sNumbers = line.split(",");
+    // transform to integer array
+    numbers = new int[sNumbers.length];
+    for(int i = 0; i < sNumbers.length; i++) {
+      numbers[i] = Integer.valueOf(sNumbers[i]);
+    }
   }
 
   @Override
