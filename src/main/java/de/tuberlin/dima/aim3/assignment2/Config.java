@@ -23,11 +23,13 @@ public class Config {
   private Config() {}
 
   public static String pathToSlashdotZoo() {
-    return "/home/ssc/Downloads/out.matrix";
+    return "/home/peter/studium/semester_1/aim-3/aim3/src/main/" +
+            "resources/de/tuberlin/dima/aim3/assignment2/slashdot-zoo/out.matrix";
   }
 
   public static String outputPath() {
-    return "/tmp/flink/";
+    return "/home/peter/studium/semester_1/aim-3/aim3/src/main/" +
+            "resources/de/tuberlin/dima/aim3/assignment2/out";
   }
 
   public static long randomSeed() {

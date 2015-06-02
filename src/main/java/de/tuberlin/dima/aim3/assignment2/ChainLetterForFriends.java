@@ -31,7 +31,7 @@ import org.apache.flink.util.Collector;
 import java.util.Random;
 import java.util.regex.Pattern;
 
-public class ChainLetter {
+public class ChainLetterForFriends {
 
   public static final double INITIATOR_RATIO = 0.00125;
   public static final double FORWARDING_PROBABILITY = 0.5;
@@ -193,6 +193,7 @@ public class ChainLetter {
   public static class EdgeReader implements FlatMapFunction<String, Tuple2<Long, Long>> {
 
     private static final Pattern SEPARATOR = Pattern.compile("[ \t,]");
+    private static final String FRIEND_LABEL = "+1";
 
     @Override
     public void flatMap(String s, Collector<Tuple2<Long, Long>> collector) throws Exception {
@@ -201,10 +202,15 @@ public class ChainLetter {
 
         long source = Long.parseLong(tokens[0]);
         long target = Long.parseLong(tokens[1]);
+        boolean isFriend = FRIEND_LABEL.equals(tokens[2]);
 
-        collector.collect(new Tuple2<Long, Long>(source, target));
+        if(isFriend) {
+          /* only add the edges between friends */
+          collector.collect(new Tuple2<Long, Long>(source, target));
+        }
       }
     }
+
   }
 
   public static class SelectInitiators implements MapFunction<Tuple1<Long>,Tuple2<Long,Boolean>> {
@@ -214,33 +220,37 @@ public class ChainLetter {
     @Override
     public Tuple2<Long, Boolean> map(Tuple1<Long> vertex) throws Exception {
 
-      boolean isSeedVertex = random.nextDouble() < ChainLetter.INITIATOR_RATIO;
+      boolean isSeedVertex = random.nextDouble() < ChainLetterForFriends.INITIATOR_RATIO;
       return new Tuple2<Long, Boolean>(vertex.f0, isSeedVertex);
     }
   }
 
-  public static class InitialForwards implements FlatMapFunction<Tuple2<Tuple2<Long, Boolean>, Tuple2<Long, Long>>, Tuple2<Long, Long>> {
+  public static class InitialForwards
+      implements FlatMapFunction<Tuple2<Tuple2<Long, Boolean>, Tuple2<Long, Long>>, Tuple2<Long, Long>> {
 
     private final Random random = new Random(Config.randomSeed());
 
     @Override
-    public void flatMap(Tuple2<Tuple2<Long, Boolean>, Tuple2<Long, Long>> vertexWithEdge, Collector<Tuple2<Long, Long>> collector) throws Exception {
+    public void flatMap(Tuple2<Tuple2<Long, Boolean>, Tuple2<Long, Long>> vertexWithEdge, Collector<Tuple2<Long, Long>> collector)
+        throws Exception {
 
       Tuple2<Long, Boolean> vertex = vertexWithEdge.f0;
       Tuple2<Long, Long> edge = vertexWithEdge.f1;
       boolean isSeedVertex = vertex.f1;
 
-      if (isSeedVertex && random.nextDouble() < ChainLetter.FORWARDING_PROBABILITY) {
+      if (isSeedVertex && random.nextDouble() < ChainLetterForFriends.FORWARDING_PROBABILITY) {
         collector.collect(edge);
       }
 
     }
   }
 
-  public static class ReceiveMessage implements FlatMapFunction<Tuple2<Tuple2<Long, Boolean>, Tuple1<Long>>, Tuple2<Long, Boolean>> {
+  public static class ReceiveMessage
+      implements FlatMapFunction<Tuple2<Tuple2<Long, Boolean>, Tuple1<Long>>, Tuple2<Long, Boolean>> {
 
     @Override
-    public void flatMap(Tuple2<Tuple2<Long, Boolean>, Tuple1<Long>> recipients, Collector<Tuple2<Long, Boolean>> collector) throws Exception {
+    public void flatMap(Tuple2<Tuple2<Long, Boolean>, Tuple1<Long>> recipients, Collector<Tuple2<Long, Boolean>> collector)
+        throws Exception {
       Tuple2<Long, Boolean> recipient = recipients.f0;
 
       boolean alreadyReceived = recipient.f1;
@@ -250,7 +260,8 @@ public class ChainLetter {
     }
   }
 
-  public static class ForwardToFriend implements FlatMapFunction<Tuple2<Tuple2<Long, Boolean>, Tuple2<Long, Long>>, Tuple2<Long, Long>> {
+  public static class ForwardToFriend
+      implements FlatMapFunction<Tuple2<Tuple2<Long, Boolean>, Tuple2<Long, Long>>, Tuple2<Long, Long>> {
 
     private final Random random = new Random(Config.randomSeed());
 
@@ -258,7 +269,7 @@ public class ChainLetter {
     public void flatMap(Tuple2<Tuple2<Long, Boolean>, Tuple2<Long, Long>> recipientsAndEdge,
                         Collector<Tuple2<Long, Long>> collector) throws Exception {
 
-      if (random.nextDouble() < ChainLetter.FORWARDING_PROBABILITY) {
+      if (random.nextDouble() < ChainLetterForFriends.FORWARDING_PROBABILITY) {
         Tuple2<Long, Long> edge = recipientsAndEdge.f1;
         collector.collect(edge);
       }
