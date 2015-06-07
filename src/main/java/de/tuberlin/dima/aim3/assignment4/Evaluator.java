@@ -26,6 +26,8 @@ import org.apache.flink.api.java.operators.DataSource;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.util.Collector;
 
+import java.util.Iterator;
+
 
 public class Evaluator {
 
@@ -39,7 +41,7 @@ public class Evaluator {
 
     evaluation.print();
 
-    env.execute();
+    env.execute("Naive Bayes - Evaluator");
   }
 
   public static class ConditionalReader implements MapFunction<String, Tuple3<String, String, Double>> {
@@ -47,8 +49,9 @@ public class Evaluator {
     @Override
     public Tuple3<String, String, Double> map(String line) throws Exception {
       String[] elements = line.split("\t");
-      return new Tuple3<String, String, Double>(elements[0], elements[1], Double.parseDouble(elements[2]));
+      return new Tuple3<>(elements[0], elements[1], Double.parseDouble(elements[2]));
     }
+
   }
 
   public static class Evaluate implements GroupReduceFunction<Tuple3<String, String, Double>, String> {
@@ -60,12 +63,17 @@ public class Evaluator {
     public void reduce(Iterable<Tuple3<String, String, Double>> predictions, Collector<String> collector)
         throws Exception {
 
-      double accuracy = 0.0;
+      for(Iterator<Tuple3<String, String, Double>> p = predictions.iterator(); p.hasNext();) {
+        total++;
+        Tuple3 tuple = p.next();
+        correct += tuple.f0.equals(tuple.f1) ? 1 : 0;
+      }
 
-      // IMPLEMENT ME
+      double accuracy = (correct / total) * 100.0;
 
       collector.collect("Classifier achieved: " + accuracy + " % accuracy");
     }
+
   }
 
 }

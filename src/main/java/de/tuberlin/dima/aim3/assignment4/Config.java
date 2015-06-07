@@ -20,8 +20,8 @@ package de.tuberlin.dima.aim3.assignment4;
 
 public class Config {
 
-  private static final String INPUT_PATH = "/home/ssc/Entwicklung/projects/aim3/src/test/resources/assignment4/";
-  private static final String OUTPUT_PATH = "/tmp/assi4/";
+  private static final String INPUT_PATH = "/home/peter/studium/semester_1/aim-3/aim3/src/test/resources/assignment4/";
+  private static final String OUTPUT_PATH = "/tmp/aim3/assignment4/";
 
   private Config() {}
 
@@ -31,6 +31,10 @@ public class Config {
 
   public static String pathToTestSet() {
     return INPUT_PATH + "test.tab";
+  }
+
+  public static String pathToSecretTestSet() {
+    return INPUT_PATH + "secrettest.dat";
   }
 
   public static String pathToOutput() {

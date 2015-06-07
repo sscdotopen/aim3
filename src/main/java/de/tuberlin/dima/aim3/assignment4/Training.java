@@ -19,6 +19,7 @@
 package de.tuberlin.dima.aim3.assignment4;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.operators.DataSource;
@@ -37,19 +38,25 @@ public class Training {
     DataSource<String> input = env.readTextFile(Config.pathToTrainingSet());
 
     // read input with df-cut
-    DataSet<Tuple3<String, String, Long>> labeledTerms = input.flatMap(new DataReader());
+    DataSet<Tuple3<String, String, Long>> labeledTerms
+        = input.flatMap(new DataReader());
 
     // conditional counter per word per label
-    DataSet<Tuple3<String, String, Long>> termCounts = null; // IMPLEMENT ME
+    DataSet<Tuple3<String, String, Long>> termCounts =
+        labeledTerms.groupBy(0, 1)
+            .reduce(new WordCountPerTerm());
 
     termCounts.writeAsCsv(Config.pathToConditionals(), "\n", "\t", FileSystem.WriteMode.OVERWRITE);
 
     // word counts per label
-    DataSet<Tuple2<String, Long>> termLabelCounts = null; // IMPLEMENT ME
+    DataSet<Tuple2<String, Long>> termLabelCounts =
+        termCounts.project(0, 2).types(String.class, Long.class)
+            .groupBy(0)
+            .reduce(new WordCountPerLabel());
 
     termLabelCounts.writeAsCsv(Config.pathToSums(), "\n", "\t", FileSystem.WriteMode.OVERWRITE);
 
-    env.execute();
+    env.execute("Naive Bayes - Training");
   }
 
   public static class DataReader implements FlatMapFunction<String, Tuple3<String, String, Long>> {
@@ -61,8 +68,36 @@ public class Training {
       String[] terms = tokens[1].split(",");
 
       for (String term : terms) {
-        collector.collect(new Tuple3<String, String, Long>(label, term, 1L));
+        collector.collect(new Tuple3<>(label, term, 1L));
       }
     }
+
   }
+
+  public static class WordCountPerTerm implements ReduceFunction<Tuple3<String, String, Long>> {
+
+    @Override
+    public Tuple3<String, String, Long> reduce(Tuple3<String, String, Long> t1, Tuple3<String, String, Long> t2)
+        throws Exception {
+
+      Long count = t1.f2 + t2.f2;
+
+      return new Tuple3<>(t1.f0, t1.f1, count);
+    }
+
+  }
+
+  public static class WordCountPerLabel implements ReduceFunction<Tuple2<String, Long>> {
+
+    @Override
+    public Tuple2<String, Long> reduce(Tuple2<String, Long> t1, Tuple2<String, Long> t2)
+        throws Exception {
+
+      Long count = t1.f1 + t2.f1;
+
+      return new Tuple2<>(t1.f0, count);
+    }
+
+  }
+
 }

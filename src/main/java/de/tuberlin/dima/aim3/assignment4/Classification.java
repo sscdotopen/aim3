@@ -30,7 +30,8 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 
-import java.util.Map;
+import java.util.Collection;
+import java.util.HashMap;
 
 public class Classification {
 
@@ -38,21 +39,27 @@ public class Classification {
 
     ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 
+    /* conditional counts of words per label (<label, word, count>) */
     DataSource<String> conditionalInput = env.readTextFile(Config.pathToConditionals());
-    DataSource<String> sumInput = env.readTextFile(Config.pathToSums());
-
     DataSet<Tuple3<String, String, Long>> conditionals = conditionalInput.map(new ConditionalReader());
+
+    /* counts of all word counts per label (<label, counts>) */
+    DataSource<String> sumInput = env.readTextFile(Config.pathToSums());
     DataSet<Tuple2<String, Long>> sums = sumInput.map(new SumReader());
 
+    /* test data */
     DataSource<String> testData = env.readTextFile(Config.pathToTestSet());
+    //DataSource<String> secretTestData =  env.readTextFile(Config.pathToSecretTestSet());
 
-    DataSet<Tuple3<String, String, Double>> classifiedDataPoints = testData.map(new Classifier())
-        .withBroadcastSet(conditionals, "conditionals")
-        .withBroadcastSet(sums, "sums");
+    /* classified test data points */
+    DataSet<Tuple3<String, String, Double>> classifiedDataPoints =
+        testData.map(new Classifier())
+            .withBroadcastSet(conditionals, "conditionals")
+            .withBroadcastSet(sums, "sums");
 
     classifiedDataPoints.writeAsCsv(Config.pathToOutput(), "\n", "\t", FileSystem.WriteMode.OVERWRITE);
 
-    env.execute();
+    env.execute("Naive Bayes - Classification");
   }
 
   public static class ConditionalReader implements MapFunction<String, Tuple3<String, String, Long>> {
@@ -60,8 +67,9 @@ public class Classification {
     @Override
     public Tuple3<String, String, Long> map(String s) throws Exception {
       String[] elements = s.split("\t");
-      return new Tuple3<String, String, Long>(elements[0], elements[1], Long.parseLong(elements[2]));
+      return new Tuple3<>(elements[0], elements[1], Long.parseLong(elements[2]));
     }
+
   }
 
   public static class SumReader implements MapFunction<String, Tuple2<String, Long>> {
@@ -69,37 +77,78 @@ public class Classification {
     @Override
     public Tuple2<String, Long> map(String s) throws Exception {
       String[] elements = s.split("\t");
-      return new Tuple2<String, Long>(elements[0], Long.parseLong(elements[1]));
+      return new Tuple2<>(elements[0], Long.parseLong(elements[1]));
     }
-  }
 
+  }
 
   public static class Classifier extends RichMapFunction<String, Tuple3<String, String, Double>>  {
 
-     private final Map<String, Map<String, Long>> wordCounts = Maps.newHashMap();
-     private final Map<String, Long> wordSums = Maps.newHashMap();
+    private final HashMap<String, HashMap<String, Long>> wordCounts = Maps.newHashMap();
+    private final HashMap<String, Long> wordSums = Maps.newHashMap();
+    private final Long k = Config.getSmoothingParameter();
 
-     @Override
-     public void open(Configuration parameters) throws Exception {
-       super.open(parameters);
+    @Override
+    public void open(Configuration parameters) throws Exception {
+      super.open(parameters);
 
-       // IMPLEMENT ME
-     }
+      /* conditional counts of words per label (<label, word, count>) */
+      Collection<Tuple3<String, String, Long>> conditionals =
+         getRuntimeContext().getBroadcastVariable("conditionals");
 
-     @Override
-     public Tuple3<String, String, Double> map(String line) throws Exception {
+      conditionals.forEach(tuple -> {
+        HashMap<String, Long> wordCount = wordCounts.get(tuple.f0);
+        if(wordCount != null) {
+          wordCount.put(tuple.f1, tuple.f2);
+        } else {
+          wordCounts.put(tuple.f0, new HashMap<String, Long>(){{
+            put(tuple.f1, tuple.f2);
+          }});
+        }
+      });
 
-       String[] tokens = line.split("\t");
-       String label = tokens[0];
-       String[] terms = tokens[1].split(",");
+      /* counts of all word counts per label (<label, counts>) */
+      Collection<Tuple2<String, Long>> sums =
+          getRuntimeContext().getBroadcastVariable("sums");
 
-       double maxProbability = Double.NEGATIVE_INFINITY;
-       String predictionLabel = "";
+      sums.forEach(tuple -> wordSums.put(tuple.f0, tuple.f1));
+    }
 
-       // IMPLEMENT ME
+    @Override
+    public Tuple3<String, String, Double> map(String line) throws Exception {
 
-       return new Tuple3<String, String, Double>(label, predictionLabel, maxProbability);
-     }
-   }
+      String[] tokens = line.split("\t");
+      String label = tokens[0];
+      String[] terms = tokens[1].split(",");
+
+      double maxProbability = Double.NEGATIVE_INFINITY;
+      String predictionLabel = "";
+
+      for(String currLabel: wordCounts.keySet()) {
+        // for each known label calculate the probability
+        HashMap<String, Long> wordCountPerLabel = wordCounts.get(currLabel);
+        double currProbability = 0.0;
+        for (String term: terms) {
+          // 1. term count per label 'L'
+          long cntTermInLabel = wordCountPerLabel.get(term) == null ? 0 : wordCountPerLabel.get(term);
+          // 2. total number of words in label 'L'
+          long cntWordsInLabel = wordSums.get(currLabel);
+          // number of unique words per label 'L' for smoothing
+          long cntDistinctWordsInLabel = wordCountPerLabel.size();
+          // 3. calculate the probability of current term in current label
+          //    p(term | label) = ( count(term) + k ) / ( sum( count(term) + k ) )
+          currProbability += Math.log(((double) (cntTermInLabel + k)) /
+              ((double) (cntWordsInLabel) + (cntDistinctWordsInLabel * k)));
+        }
+        if(currProbability > maxProbability) {
+          maxProbability = currProbability;
+          predictionLabel = currLabel;
+        }
+      }
+
+      return new Tuple3<>(label, predictionLabel, maxProbability);
+    }
+
+  }
 
 }
