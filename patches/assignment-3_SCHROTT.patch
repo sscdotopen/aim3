@@ -1,0 +1,532 @@
+From 55a4f70f097fc8cde84cc17db6767ede078ac415 Mon Sep 17 00:00:00 2001
+From: Peter Schrott <peter.schrott89@gmail.com>
+Date: Sun, 7 Jun 2015 15:18:09 +0200
+Subject: [PATCH] implemenations for assignment-3. Java version 8 with lambda
+ expression is used
+
+---
+ .../dima/aim3/assignment4/CUREAlgorighm.java       | 184 +++++++++++++++++++++
+ .../dima/aim3/assignment4/Classification.java      | 115 +++++++++----
+ .../de/tuberlin/dima/aim3/assignment4/Config.java  |   8 +-
+ .../tuberlin/dima/aim3/assignment4/Evaluator.java  |  16 +-
+ .../tuberlin/dima/aim3/assignment4/Training.java   |  45 ++++-
+ 5 files changed, 324 insertions(+), 44 deletions(-)
+ create mode 100644 src/main/java/de/tuberlin/dima/aim3/assignment4/CUREAlgorighm.java
+
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment4/CUREAlgorighm.java b/src/main/java/de/tuberlin/dima/aim3/assignment4/CUREAlgorighm.java
+new file mode 100644
+index 0000000..799ed56
+--- /dev/null
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment4/CUREAlgorighm.java
+@@ -0,0 +1,184 @@
++package de.tuberlin.dima.aim3.assignment4;
++
++import org.apache.flink.api.common.functions.GroupReduceFunction;
++import org.apache.flink.api.common.functions.RichGroupReduceFunction;
++import org.apache.flink.api.common.functions.RichMapFunction;
++import org.apache.flink.api.java.DataSet;
++import org.apache.flink.api.java.ExecutionEnvironment;
++import org.apache.flink.api.java.operators.DeltaIteration;
++import org.apache.flink.api.java.tuple.Tuple2;
++import org.apache.flink.api.java.tuple.Tuple3;
++import org.apache.flink.configuration.Configuration;
++import org.apache.flink.util.Collector;
++
++import java.util.ArrayList;
++import java.util.Collection;
++import java.util.List;
++
++/**
++ * Assignment 3 - Exercise B. Clustering
++ *
++ * 3. Implementation of the CURE Algorithm
++ *
++ * In certain clustering algorithms, such as CURE, we need to pick a representative set of points
++ * in a supposed cluster, and these points should be as far away from each other as possible.
++ * That is, begin with the two furthest points, and at each step add the point whose minimum
++ * distance to any of the previously selected points is maximum.
++ *
++ * Pete Schrott (370314)
++ * peter.schrott@campus.tu-online.de
++ * 05.06.15
++ */
++public class CUREAlgorighm {
++
++  public static void main(String[] args) throws Exception {
++
++    /* Provided Inputs */
++    List<Tuple2<Double, Double>> initList = new ArrayList<Tuple2<Double, Double>>() {{
++     add(new Tuple2<>(0.0, 0.0));
++      add(new Tuple2<>(10.0, 10.0));
++    }};
++
++    List<Tuple2<Double, Double>> clusterList = new ArrayList<Tuple2<Double, Double>>() {{
++      add(new Tuple2<>(1.0, 6.0));
++      add(new Tuple2<>(3.0, 7.0));
++      add(new Tuple2<>(4.0, 3.0));
++      add(new Tuple2<>(7.0, 7.0));
++      add(new Tuple2<>(8.0, 2.0));
++      add(new Tuple2<>(9.0, 5.0));
++    }};
++
++    int maxIterations = 5;
++
++    ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
++    env.setDegreeOfParallelism(1);
++
++    /* input cluster */
++    DataSet<Tuple2<Double, Double>> cluster = env.fromCollection(clusterList);
++
++    /* cluster of representatives  */
++    DataSet<Tuple2<Double, Double>> representatives = env.fromCollection(initList);
++
++    /* delta iteration for step wise adding points from the input cluster to the representatives */
++    DeltaIteration<Tuple2<Double, Double>, Tuple2<Double, Double>> deltaIterator =
++        representatives.iterateDelta(cluster, maxIterations, 0);
++
++    /* find the minimum distance to representatives for each candidate */
++    DataSet<Tuple3<Double, Double, Double>> candidatesAndMinDistances =
++        deltaIterator.getWorkset()
++          .map(new MinDistanceToInitials()).withBroadcastSet(representatives, "representatives");
++
++    /* find the candidate with the maximal distance of the minimal distances */
++    DataSet<Tuple2<Double, Double>> candidateWithMaxDistance =
++        candidatesAndMinDistances.reduceGroup(new MaxDistanceReducer());
++
++    /* remove the candidate with the maximal distance of minimal distances to the work set */
++    DataSet<Tuple2<Double, Double>> nextWorkset =
++        candidatesAndMinDistances.project(0, 1).types(Double.class, Double.class)
++            .reduceGroup(new RemoveCandidate())
++                .withBroadcastSet(candidateWithMaxDistance, "candidates");
++
++    /* merge delta to solution set and start over */
++    deltaIterator.closeWith(candidateWithMaxDistance, nextWorkset).print();
++
++    env.execute();
++  }
++
++
++  /**
++   * Finds the minimum distance to one of the representatives.
++   */
++  private static class MinDistanceToInitials
++      extends RichMapFunction<Tuple2<Double, Double>, Tuple3<Double, Double, Double>> {
++
++    private static Collection<Tuple2<Double, Double>> representatives;
++
++    @Override
++    public void open(Configuration parameters) throws Exception {
++      super.open(parameters);
++
++      representatives = getRuntimeContext().getBroadcastVariable("representatives");
++    }
++
++    @Override
++    public Tuple3<Double, Double, Double> map(Tuple2<Double, Double> value) throws Exception {
++
++      Double minDistance = Double.MAX_VALUE;
++      Double currDistance;
++
++      for(Tuple2<Double, Double> point: representatives) {
++        currDistance = calculateEuclideanDistance(point, value);
++        if(currDistance < minDistance) {
++          minDistance = currDistance;
++        }
++      }
++      return new Tuple3<>(value.f0, value.f1, minDistance);
++    }
++
++    private Double calculateEuclideanDistance(Tuple2<Double, Double> p1,
++                                              Tuple2<Double, Double> p2) {
++      return Math.sqrt(Math.pow((p1.f0 - p2.f0), 2) + Math.pow((p1.f1 - p2.f1), 2));
++    }
++
++  }
++
++  /**
++   * Removes the new representative from the workset for the next iteration.
++   */
++  private static class RemoveCandidate
++      extends RichGroupReduceFunction<Tuple2<Double, Double>, Tuple2<Double, Double>> {
++
++    private static Collection<Tuple2<Double, Double>> candidates;
++
++    @Override
++    public void open(Configuration parameters) throws Exception {
++      super.open(parameters);
++      candidates = getRuntimeContext().getBroadcastVariable("candidates");
++    }
++
++    @Override
++    public void reduce(Iterable<Tuple2<Double, Double>> values,
++                       Collector<Tuple2<Double, Double>> out) throws Exception {
++
++      values.forEach((Tuple2<Double, Double> value) -> {
++        candidates.forEach((Tuple2<Double, Double> candidate) -> {
++          if(!candidate.f0.equals(value.f0) && !candidate.f1.equals(value.f1)) {
++            out.collect(new Tuple2<>(value.f0, value.f1));
++          } else {
++            System.out.println("point to join representation: " +
++                "(" + value.f0 + ", "  + value.f1 + ")");
++          }
++        });
++      });
++    }
++
++  }
++
++  /**
++   * Finds the candidate with the maximum of the minimum distances to one of the representatives.
++   */
++  private static class MaxDistanceReducer
++      implements GroupReduceFunction<Tuple3<Double, Double, Double>, Tuple2<Double, Double>> {
++    @Override
++    public void reduce(Iterable<Tuple3<Double, Double, Double>> values,
++                       Collector<Tuple2<Double, Double>> out)
++        throws Exception {
++
++      Double distanceMax = Double.MIN_VALUE;
++      Double xOfMax = 0.0;
++      Double yOfMax = 0.0;
++
++      for (Tuple3<Double, Double, Double> val : values) {
++        if(val.f2 > distanceMax) {
++          distanceMax = val.f2;
++          xOfMax = val.f0;
++          yOfMax = val.f1;
++        }
++      }
++
++      out.collect(new Tuple2<>(xOfMax, yOfMax));
++    }
++
++  }
++
++}
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment4/Classification.java b/src/main/java/de/tuberlin/dima/aim3/assignment4/Classification.java
+index 7cf9ecf..5f999d6 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment4/Classification.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment4/Classification.java
+@@ -30,7 +30,8 @@ import org.apache.flink.api.java.tuple.Tuple3;
+ import org.apache.flink.configuration.Configuration;
+ import org.apache.flink.core.fs.FileSystem;
+ 
+-import java.util.Map;
++import java.util.Collection;
++import java.util.HashMap;
+ 
+ public class Classification {
+ 
+@@ -38,21 +39,27 @@ public class Classification {
+ 
+     ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+ 
++    /* conditional counts of words per label (<label, word, count>) */
+     DataSource<String> conditionalInput = env.readTextFile(Config.pathToConditionals());
+-    DataSource<String> sumInput = env.readTextFile(Config.pathToSums());
+-
+     DataSet<Tuple3<String, String, Long>> conditionals = conditionalInput.map(new ConditionalReader());
++
++    /* counts of all word counts per label (<label, counts>) */
++    DataSource<String> sumInput = env.readTextFile(Config.pathToSums());
+     DataSet<Tuple2<String, Long>> sums = sumInput.map(new SumReader());
+ 
++    /* test data */
+     DataSource<String> testData = env.readTextFile(Config.pathToTestSet());
++    //DataSource<String> secretTestData =  env.readTextFile(Config.pathToSecretTestSet());
+ 
+-    DataSet<Tuple3<String, String, Double>> classifiedDataPoints = testData.map(new Classifier())
+-        .withBroadcastSet(conditionals, "conditionals")
+-        .withBroadcastSet(sums, "sums");
++    /* classified test data points */
++    DataSet<Tuple3<String, String, Double>> classifiedDataPoints =
++        testData.map(new Classifier())
++            .withBroadcastSet(conditionals, "conditionals")
++            .withBroadcastSet(sums, "sums");
+ 
+     classifiedDataPoints.writeAsCsv(Config.pathToOutput(), "\n", "\t", FileSystem.WriteMode.OVERWRITE);
+ 
+-    env.execute();
++    env.execute("Naive Bayes - Classification");
+   }
+ 
+   public static class ConditionalReader implements MapFunction<String, Tuple3<String, String, Long>> {
+@@ -60,8 +67,9 @@ public class Classification {
+     @Override
+     public Tuple3<String, String, Long> map(String s) throws Exception {
+       String[] elements = s.split("\t");
+-      return new Tuple3<String, String, Long>(elements[0], elements[1], Long.parseLong(elements[2]));
++      return new Tuple3<>(elements[0], elements[1], Long.parseLong(elements[2]));
+     }
++
+   }
+ 
+   public static class SumReader implements MapFunction<String, Tuple2<String, Long>> {
+@@ -69,37 +77,78 @@ public class Classification {
+     @Override
+     public Tuple2<String, Long> map(String s) throws Exception {
+       String[] elements = s.split("\t");
+-      return new Tuple2<String, Long>(elements[0], Long.parseLong(elements[1]));
++      return new Tuple2<>(elements[0], Long.parseLong(elements[1]));
+     }
+-  }
+ 
++  }
+ 
+   public static class Classifier extends RichMapFunction<String, Tuple3<String, String, Double>>  {
+ 
+-     private final Map<String, Map<String, Long>> wordCounts = Maps.newHashMap();
+-     private final Map<String, Long> wordSums = Maps.newHashMap();
+-
+-     @Override
+-     public void open(Configuration parameters) throws Exception {
+-       super.open(parameters);
++    private final HashMap<String, HashMap<String, Long>> wordCounts = Maps.newHashMap();
++    private final HashMap<String, Long> wordSums = Maps.newHashMap();
++    private final Long k = Config.getSmoothingParameter();
+ 
+-       // IMPLEMENT ME
+-     }
+-
+-     @Override
+-     public Tuple3<String, String, Double> map(String line) throws Exception {
+-
+-       String[] tokens = line.split("\t");
+-       String label = tokens[0];
+-       String[] terms = tokens[1].split(",");
+-
+-       double maxProbability = Double.NEGATIVE_INFINITY;
+-       String predictionLabel = "";
++    @Override
++    public void open(Configuration parameters) throws Exception {
++      super.open(parameters);
++
++      /* conditional counts of words per label (<label, word, count>) */
++      Collection<Tuple3<String, String, Long>> conditionals =
++         getRuntimeContext().getBroadcastVariable("conditionals");
++
++      conditionals.forEach(tuple -> {
++        HashMap<String, Long> wordCount = wordCounts.get(tuple.f0);
++        if(wordCount != null) {
++          wordCount.put(tuple.f1, tuple.f2);
++        } else {
++          wordCounts.put(tuple.f0, new HashMap<String, Long>(){{
++            put(tuple.f1, tuple.f2);
++          }});
++        }
++      });
++
++      /* counts of all word counts per label (<label, counts>) */
++      Collection<Tuple2<String, Long>> sums =
++          getRuntimeContext().getBroadcastVariable("sums");
++
++      sums.forEach(tuple -> wordSums.put(tuple.f0, tuple.f1));
++    }
+ 
+-       // IMPLEMENT ME
++    @Override
++    public Tuple3<String, String, Double> map(String line) throws Exception {
++
++      String[] tokens = line.split("\t");
++      String label = tokens[0];
++      String[] terms = tokens[1].split(",");
++
++      double maxProbability = Double.NEGATIVE_INFINITY;
++      String predictionLabel = "";
++
++      for(String currLabel: wordCounts.keySet()) {
++        // for each known label calculate the probability
++        HashMap<String, Long> wordCountPerLabel = wordCounts.get(currLabel);
++        double currProbability = 0.0;
++        for (String term: terms) {
++          // 1. term count per label 'L'
++          long cntTermInLabel = wordCountPerLabel.get(term) == null ? 0 : wordCountPerLabel.get(term);
++          // 2. total number of words in label 'L'
++          long cntWordsInLabel = wordSums.get(currLabel);
++          // number of unique words per label 'L' for smoothing
++          long cntDistinctWordsInLabel = wordCountPerLabel.size();
++          // 3. calculate the probability of current term in current label
++          //    p(term | label) = ( count(term) + k ) / ( sum( count(term) + k ) )
++          currProbability += Math.log(((double) (cntTermInLabel + k)) /
++              ((double) (cntWordsInLabel) + (cntDistinctWordsInLabel * k)));
++        }
++        if(currProbability > maxProbability) {
++          maxProbability = currProbability;
++          predictionLabel = currLabel;
++        }
++      }
++
++      return new Tuple3<>(label, predictionLabel, maxProbability);
++    }
+ 
+-       return new Tuple3<String, String, Double>(label, predictionLabel, maxProbability);
+-     }
+-   }
++  }
+ 
+-}
++}
+\ No newline at end of file
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment4/Config.java b/src/main/java/de/tuberlin/dima/aim3/assignment4/Config.java
+index 60599b2..c4fe73c 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment4/Config.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment4/Config.java
+@@ -20,8 +20,8 @@ package de.tuberlin.dima.aim3.assignment4;
+ 
+ public class Config {
+ 
+-  private static final String INPUT_PATH = "/home/ssc/Entwicklung/projects/aim3/src/test/resources/assignment4/";
+-  private static final String OUTPUT_PATH = "/tmp/assi4/";
++  private static final String INPUT_PATH = "/home/peter/studium/semester_1/aim-3/aim3/src/test/resources/assignment4/";
++  private static final String OUTPUT_PATH = "/tmp/aim3/assignment4/";
+ 
+   private Config() {}
+ 
+@@ -33,6 +33,10 @@ public class Config {
+     return INPUT_PATH + "test.tab";
+   }
+ 
++  public static String pathToSecretTestSet() {
++    return INPUT_PATH + "secrettest.dat";
++  }
++
+   public static String pathToOutput() {
+     return OUTPUT_PATH + "result";
+   }
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment4/Evaluator.java b/src/main/java/de/tuberlin/dima/aim3/assignment4/Evaluator.java
+index 699c663..ddef902 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment4/Evaluator.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment4/Evaluator.java
+@@ -26,6 +26,8 @@ import org.apache.flink.api.java.operators.DataSource;
+ import org.apache.flink.api.java.tuple.Tuple3;
+ import org.apache.flink.util.Collector;
+ 
++import java.util.Iterator;
++
+ 
+ public class Evaluator {
+ 
+@@ -39,7 +41,7 @@ public class Evaluator {
+ 
+     evaluation.print();
+ 
+-    env.execute();
++    env.execute("Naive Bayes - Evaluator");
+   }
+ 
+   public static class ConditionalReader implements MapFunction<String, Tuple3<String, String, Double>> {
+@@ -47,8 +49,9 @@ public class Evaluator {
+     @Override
+     public Tuple3<String, String, Double> map(String line) throws Exception {
+       String[] elements = line.split("\t");
+-      return new Tuple3<String, String, Double>(elements[0], elements[1], Double.parseDouble(elements[2]));
++      return new Tuple3<>(elements[0], elements[1], Double.parseDouble(elements[2]));
+     }
++
+   }
+ 
+   public static class Evaluate implements GroupReduceFunction<Tuple3<String, String, Double>, String> {
+@@ -60,12 +63,17 @@ public class Evaluator {
+     public void reduce(Iterable<Tuple3<String, String, Double>> predictions, Collector<String> collector)
+         throws Exception {
+ 
+-      double accuracy = 0.0;
++      for(Iterator<Tuple3<String, String, Double>> p = predictions.iterator(); p.hasNext();) {
++        total++;
++        Tuple3 tuple = p.next();
++        correct += tuple.f0.equals(tuple.f1) ? 1 : 0;
++      }
+ 
+-      // IMPLEMENT ME
++      double accuracy = (correct / total) * 100.0;
+ 
+       collector.collect("Classifier achieved: " + accuracy + " % accuracy");
+     }
++
+   }
+ 
+ }
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment4/Training.java b/src/main/java/de/tuberlin/dima/aim3/assignment4/Training.java
+index c5d9b2e..66b1054 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment4/Training.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment4/Training.java
+@@ -19,6 +19,7 @@
+ package de.tuberlin.dima.aim3.assignment4;
+ 
+ import org.apache.flink.api.common.functions.FlatMapFunction;
++import org.apache.flink.api.common.functions.ReduceFunction;
+ import org.apache.flink.api.java.DataSet;
+ import org.apache.flink.api.java.ExecutionEnvironment;
+ import org.apache.flink.api.java.operators.DataSource;
+@@ -37,19 +38,25 @@ public class Training {
+     DataSource<String> input = env.readTextFile(Config.pathToTrainingSet());
+ 
+     // read input with df-cut
+-    DataSet<Tuple3<String, String, Long>> labeledTerms = input.flatMap(new DataReader());
++    DataSet<Tuple3<String, String, Long>> labeledTerms
++        = input.flatMap(new DataReader());
+ 
+     // conditional counter per word per label
+-    DataSet<Tuple3<String, String, Long>> termCounts = null; // IMPLEMENT ME
++    DataSet<Tuple3<String, String, Long>> termCounts =
++        labeledTerms.groupBy(0, 1)
++            .reduce(new WordCountPerTerm());
+ 
+     termCounts.writeAsCsv(Config.pathToConditionals(), "\n", "\t", FileSystem.WriteMode.OVERWRITE);
+ 
+     // word counts per label
+-    DataSet<Tuple2<String, Long>> termLabelCounts = null; // IMPLEMENT ME
++    DataSet<Tuple2<String, Long>> termLabelCounts =
++        termCounts.project(0, 2).types(String.class, Long.class)
++            .groupBy(0)
++            .reduce(new WordCountPerLabel());
+ 
+     termLabelCounts.writeAsCsv(Config.pathToSums(), "\n", "\t", FileSystem.WriteMode.OVERWRITE);
+ 
+-    env.execute();
++    env.execute("Naive Bayes - Training");
+   }
+ 
+   public static class DataReader implements FlatMapFunction<String, Tuple3<String, String, Long>> {
+@@ -61,8 +68,36 @@ public class Training {
+       String[] terms = tokens[1].split(",");
+ 
+       for (String term : terms) {
+-        collector.collect(new Tuple3<String, String, Long>(label, term, 1L));
++        collector.collect(new Tuple3<>(label, term, 1L));
+       }
+     }
++
++  }
++
++  public static class WordCountPerTerm implements ReduceFunction<Tuple3<String, String, Long>> {
++
++    @Override
++    public Tuple3<String, String, Long> reduce(Tuple3<String, String, Long> t1, Tuple3<String, String, Long> t2)
++        throws Exception {
++
++      Long count = t1.f2 + t2.f2;
++
++      return new Tuple3<>(t1.f0, t1.f1, count);
++    }
++
+   }
++
++  public static class WordCountPerLabel implements ReduceFunction<Tuple2<String, Long>> {
++
++    @Override
++    public Tuple2<String, Long> reduce(Tuple2<String, Long> t1, Tuple2<String, Long> t2)
++        throws Exception {
++
++      Long count = t1.f1 + t2.f1;
++
++      return new Tuple2<>(t1.f0, count);
++    }
++
++  }
++
+ }
+\ No newline at end of file
+-- 
+1.9.1
+
