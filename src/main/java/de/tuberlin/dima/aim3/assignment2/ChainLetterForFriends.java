@@ -138,7 +138,7 @@ public class ChainLetterForFriends {
      * output set: Tuple 1 (vertex id)
      */
     DataSet<Tuple1<Long>> deliverMessage =
-        deltaIteration.getWorkset().project(1).types(Long.class).distinct();
+        deltaIteration.getWorkset().<Tuple1<Long>>project(1).distinct();
 
     /*
      * ReceiveMessage

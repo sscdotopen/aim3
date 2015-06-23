@@ -146,7 +146,7 @@ public class Classification {
         }
       }
 
-      return new Tuple3<>(label, predictionLabel,maxProbability);
+      return new Tuple3<>(label, predictionLabel, maxProbability);
     }
 
   }

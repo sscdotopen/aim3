@@ -48,25 +48,25 @@ public class SignedOutDegreeDistribution {
 
     /* Create a data set of all vertex ids and count them */
     DataSet<Long> numVertices =
-      edges.project(0).types(Long.class)
-        .union(edges.project(1).types(Long.class))
+      edges.<Tuple1<Long>>project(0)
+        .union(edges.<Tuple1<Long>>project(1))
           .distinct().reduceGroup(new CountVertices());
 
     /* Compute the friend foe degree of every vertex */
     DataSet<Tuple3<Long, Long, Long>> verticesWithFriendFoeDegree =
-      edges.project(0, 2).types(Long.class, Boolean.class)
+      edges.<Tuple2<Long, Boolean>>project(0, 2)
         .groupBy(0)
         .reduceGroup(new FriendFoeDegreeOfVertex());
 
     /* Compute the degree distribution of friends */
     DataSet<Tuple2<Long, Double>> friendDegreeDistribution =
-      verticesWithFriendFoeDegree.project(0, 1).types(Long.class, Long.class)
+      verticesWithFriendFoeDegree.<Tuple2<Long, Long>>project(0, 1)
         .groupBy(1)
         .reduceGroup(new DistributionElement()).withBroadcastSet(numVertices, "numVertices");
 
     /* Compute the degree distribution of foes */
     DataSet<Tuple2<Long, Double>> foeDegreeDistribution =
-      verticesWithFriendFoeDegree.project(0, 2).types(Long.class, Long.class)
+      verticesWithFriendFoeDegree.<Tuple2<Long, Long>>project(0, 2)
         .groupBy(1)
          .reduceGroup(new DistributionElement()).withBroadcastSet(numVertices, "numVertices");
 

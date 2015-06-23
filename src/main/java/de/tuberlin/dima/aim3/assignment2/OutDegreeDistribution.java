@@ -49,13 +49,13 @@ public class OutDegreeDistribution {
 
     /* Create a dataset of all vertex ids and count them */
     DataSet<Long> numVertices =
-        edges.project(0).types(Long.class)
-            .union(edges.project(1).types(Long.class))
-            .distinct().reduceGroup(new CountVertices());
+        edges.<Tuple1<Long>>project(0)
+            .union(edges.<Tuple1<Long>>project(1))
+                .distinct().reduceGroup(new CountVertices());
 
     /* Compute the degree of every vertex */
     DataSet<Tuple2<Long, Long>> verticesWithDegree =
-        edges.project(0).types(Long.class)
+        edges.<Tuple1<Long>>project(0)
              .groupBy(0).reduceGroup(new DegreeOfVertex());
 
     /* Compute the degree distribution */
