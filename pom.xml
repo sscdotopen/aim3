@@ -61,7 +61,6 @@
     <dependency>
       <groupId>org.apache.flink</groupId>
       <artifactId>flink-java</artifactId>
-
       <version>0.10-SNAPSHOT</version>
         <exclusions>
           <exclusion>
