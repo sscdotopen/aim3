@@ -41,33 +41,147 @@ public class ChainLetter {
 
     DataSource<String> input = env.readTextFile(Config.pathToSlashdotZoo());
 
+    /*
+     * Get all edges (connections) between vertices from input file.
+     * The flatMap operator produces a data set for the input sting (line in file).
+     * The type of connection (friend or foe) is not required here.
+     *
+     * output set: Tuple 2 (src id, dest id)
+     */
     DataSet<Tuple2<Long, Long>> edges = input.flatMap(new EdgeReader());
 
+    /*
+     * EdgesToVertices
+     *
+     * Map the 2-tuple to a 1-tuple by ignoring the second value of the tuple.
+     * The result are all ids of source vertices.
+     *
+     * input set: Tuple 2 (src id, dest id)
+     *
+     * output set: Tuple 1 (src id) <= all source vertices, not unique
+     */
     DataSet<Tuple1<Long>> edgesToVertices = edges.project(0).types(Long.class);
 
+    /*
+     * UniqueVertexIDs
+     *
+     * Reduce source ids (distinct) to gain unique set of vertices.
+     *
+     * input set: Tuple 1 (src id)
+     *
+     * output set: Tuple 1 (vertex id) <= unique vertex
+     */
     DataSet<Tuple1<Long>> uniqueVertexIds = edgesToVertices.distinct();
 
+    /*
+     * SelectInitiators
+     *
+     * Map boolean (seed/notSeed) to each vertex, by using random value and initiator ratio.
+     *
+     * input set: Tuple 1 (vertex id)
+     *
+     * output set: Tuple 2 (vertex id, seed/notSeed)
+     */
     DataSet<Tuple2<Long, Boolean>> selectedInitiators = uniqueVertexIds.map(new SelectInitiators());
 
+    /*
+     * InitialForwards
+     *
+     * Join the edges to the labeled vertices, to get the destinations of seeds.
+     * Find the initial forwards: if seed && probability of 50%.
+     * The output are the edges from initial seeds to their destination.
+     *
+     * input: Tuple 2 (Tuple 1 (vertex id), Tuple 2 (src id, dest id))
+     *
+     * output: Tuple 2 (src id, dest id)
+     */
     DataSet<Tuple2<Long, Long>> initialForwards =
         selectedInitiators.join(edges).where(0).equalTo(0)
                           .flatMap(new InitialForwards());
 
+    /*
+     * DeltaIteration
+     *
+     * iterations terminate when the workingSet (set which is fed back) becomes empty.
+     * The iteration diverges either because for the update of the working set of each iteration,
+     * then, when the next forward is determined, the tuples from the solutionSet that
+     * are marked with a 'true' are not merged in the next working set anymore.
+     * It becomes smaller as in every iteration the receiver tuple is marked with 'true'.
+     * Or because the number of maximum iterations is set to 3.
+     *
+     * WorkingSet (initialSet):
+     *                          ForwardToFriend:  Tuple 2 (src id, dest id)
+     *                          (InitialForwards: Tuple 2 (src id, dest id))
+     * the currently served set of data (edges) each iteration.
+     *
+     * SolutionSet (initialState):
+     *                          ReceiveMessage:      Tuple 2 (vertex id, received/notReceived)
+     *                          (SelectedInitiators: Tuple 2 (vertex id, seed/notSeed))
+     * current state at the beginning of each iteration.
+     *
+     * max iterations: 3 => iteration diverges definitely.
+     *
+     * output set: Tuple 2 (Tuple 2 (vertex id, seed/notSeed), Tuple 2 (src id, dest id))
+     */
     DeltaIteration<Tuple2<Long, Boolean>, Tuple2<Long, Long>> deltaIteration =
         selectedInitiators.iterateDelta(initialForwards, 3, 0);
 
+    /*
+     * DeliverMessage
+     *
+     * The new unique, potential destinations for message per iteration (first tuple field of workingSet) are determined.
+     * This is done by getting the distinct set of destination vertex id from the current working set.
+     * The current working set contains the edges which were served in past iteration.
+     *
+     * input set: Tuple 2 (src id, dest id)
+     *
+     * output set: Tuple 1 (vertex id)
+     */
     DataSet<Tuple1<Long>> deliverMessage =
-        deltaIteration.getWorkset().project(1).types(Long.class).distinct();
+        deltaIteration.getWorkset().<Tuple1<Long>>project(1).distinct();
 
+    /*
+     * ReceiveMessage
+     *
+     * Join of solution set and unique potential destination set.
+     * The flatMap operator produces the output tuple under consideration of received/notReceived status of destination vertex.
+     * This building the solution set of the iteration.
+     *
+     * input set: Tuple 2 (Tuple 2 (vertex id, received/notReceived), Tuple 1 (dest id))
+     *
+     * output set: Tuple 2 (destination id, received/notReceived<false>)
+     */
     DataSet<Tuple2<Long, Boolean>> nextRecipientStates =
         deltaIteration.getSolutionSet()
                           .join(deliverMessage).where(0).equalTo(0)
                           .flatMap(new ReceiveMessage());
 
+    /*
+     * ForwardToFriend
+     *
+     * Find the next forwards (working set for next iteration) by probability (50%).
+     * By joining the edges to the receivers, the new working set is build.
+     * The output edges are served in the next iteration.
+     *
+     * input: Tuple 2 (Tuple 2 (dest id, received), Tuple 2 (src id, dest id))
+     *
+     * output: Tuple 2 (src id, dest id)
+     */
     DataSet<Tuple2<Long, Long>> nextForwards =
         nextRecipientStates.join(edges).where(0).equalTo(0)
                            .flatMap(new ForwardToFriend());
 
+    /*
+     * Result
+     *
+     * Close the iteration and get the result. The result represents the edges which were not served.
+     * Here: the connections where the chain letter was not sent to.
+     * If the set is empty this means every node was served, if not, the letter has died because of the 50%-rule.
+     *
+     * input set: Tuple 2 (Tuple 2 (vertex id, received), Tuple 2 (src id, dest id))
+     *
+     * output set: resulting working set.
+     */
     DataSet<Tuple2<Long, Boolean>> result =
         deltaIteration.closeWith(nextRecipientStates, nextForwards);
 

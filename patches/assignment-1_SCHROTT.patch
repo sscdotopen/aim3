@@ -1,0 +1,669 @@
+From c6c4601de3bb9f10d17f7ebd1321a761cd62bf63 Mon Sep 17 00:00:00 2001
+From: Peter Schrott <peter.schrott89@gmail.com>
+Date: Sun, 3 May 2015 16:25:02 +0200
+Subject: [PATCH] implementation of assignment 1
+
+min quality is now set in config to bradcast to the mapper
+
+DistributedCached is used for Broadcasting file
+
+error handling improved
+
+hashtable instead of hashmap
+---
+ .../assignment1/AverageTemperaturePerMonth.java    | 133 +++++++++++-
+ .../assignment1/BookAndAuthorBroadcastJoin.java    |  78 ++++++-
+ .../assignment1/BookAndAuthorReduceSideJoin.java   | 229 ++++++++++++++++++++-
+ .../dima/aim3/assignment1/FilteringWordCount.java  |  55 ++++-
+ .../aim3/assignment1/PrimeNumbersWritable.java     |  23 ++-
+ 5 files changed, 505 insertions(+), 13 deletions(-)
+
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment1/AverageTemperaturePerMonth.java b/src/main/java/de/tuberlin/dima/aim3/assignment1/AverageTemperaturePerMonth.java
+index ff99bf6..2c76a2f 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment1/AverageTemperaturePerMonth.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment1/AverageTemperaturePerMonth.java
+@@ -20,11 +20,25 @@ package de.tuberlin.dima.aim3.assignment1;
+ 
+ import de.tuberlin.dima.aim3.HadoopJob;
+ import org.apache.hadoop.fs.Path;
++import org.apache.hadoop.io.IntWritable;
++import org.apache.hadoop.io.NullWritable;
++import org.apache.hadoop.io.Text;
++import org.apache.hadoop.io.WritableComparable;
++import org.apache.hadoop.mapreduce.Job;
++import org.apache.hadoop.mapreduce.Mapper;
++import org.apache.hadoop.mapreduce.Reducer;
++import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
++import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
+ 
++import java.io.DataInput;
++import java.io.DataOutput;
++import java.io.IOException;
+ import java.util.Map;
+ 
+ public class AverageTemperaturePerMonth extends HadoopJob {
+ 
++  public static final String PARAM_MIN_QUALITY = "minQuality";
++
+   @Override
+   public int run(String[] args) throws Exception {
+     Map<String,String> parsedArgs = parseArgs(args);
+@@ -32,10 +46,125 @@ public class AverageTemperaturePerMonth extends HadoopJob {
+     Path inputPath = new Path(parsedArgs.get("--input"));
+     Path outputPath = new Path(parsedArgs.get("--output"));
+ 
+-    double minimumQuality = Double.parseDouble(parsedArgs.get("--minimumQuality"));
++    float minimumQuality = Float.parseFloat(parsedArgs.get("--minimumQuality"));
++
++    Job avgTmpMonth = prepareJob(inputPath, outputPath, TextInputFormat.class,
++            AvgTempMonthMapper.class, YearMonthKey.class, IntWritable.class,
++            AvgTempMonthReducer.class, YearMonthKey.class, IntWritable.class,
++            TextOutputFormat.class);
+ 
+-    //IMPLEMENT ME
++    avgTmpMonth.getConfiguration().setFloat(PARAM_MIN_QUALITY, minimumQuality);
++
++    avgTmpMonth.waitForCompletion(true);
+ 
+     return 0;
+   }
++
++  static class AvgTempMonthMapper extends Mapper<Object, Text, YearMonthKey, IntWritable> {
++
++    @Override
++    protected void map(Object key, Text line, Context ctx) throws IOException, InterruptedException {
++
++      // get the config
++      float minimumQuality = ctx.getConfiguration().getFloat(PARAM_MIN_QUALITY, 0.0f);
++
++      // split the input line by tab
++      String[] values = line.toString().split("\\t");
++
++      if(Float.valueOf(values[3]) >= minimumQuality) {
++        // filter lines with quality > minimum quality
++        // map the temperatures to the corresponding year and month
++        ctx.write(new YearMonthKey(Integer.valueOf(values[0]), Integer.valueOf(values[1])),
++                new IntWritable(Integer.valueOf(values[2])));
++
++      }
++    }
++  }
++
++  static class AvgTempMonthReducer extends Reducer<YearMonthKey, IntWritable, NullWritable, Text> {
++
++    @Override
++    protected void reduce(YearMonthKey key, Iterable<IntWritable> values, Context ctx)
++            throws IOException, InterruptedException {
++
++      // sum up the measured temperatures and count the amount
++      int sum = 0;
++      int cntr = 0;
++
++      for (IntWritable val : values) {
++        sum += val.get();
++        cntr++;
++      }
++
++      // write output (year|tab|month|tab|avgtempearatur)
++      ctx.write(NullWritable.get(), new Text(key.getYear() + "\t" + key.getMonth() + "\t" + (double)sum / (double)cntr));
++    }
++  }
++
++  /**
++   * WritableComparable to reduce the dataset containing more then
++   * one measurement per year and month to year and month
++   */
++  static class YearMonthKey implements WritableComparable<YearMonthKey> {
++
++    private int year;
++    private int month;
++
++    public YearMonthKey() {
++    }
++
++    public YearMonthKey(int year, int month) {
++      this.set(year, month);
++    }
++
++    public void set(int year, int month) {
++      this.year = year;
++      this.month = month;
++    }
++
++    public int getYear() {
++      return this.year;
++    }
++
++    public int getMonth() {
++      return this.month;
++    }
++
++    public void readFields(DataInput in) throws IOException {
++      this.year = in.readInt();
++      this.month = in.readInt();
++    }
++
++    public void write(DataOutput out) throws IOException {
++      out.writeInt(this.year);
++      out.writeInt(this.month);
++    }
++
++    public boolean equals(Object o) {
++      if (!(o instanceof YearMonthKey)) {
++        return false;
++      } else {
++        YearMonthKey other = (YearMonthKey) o;
++        return this.year == other.year && this.month == other.month;
++      }
++    }
++
++    public int hashCode() {
++      final int prime = 31;
++      int result = 1;
++      result = prime * result + this.year;
++      result = prime * result + (this.month ^ (this.month >>> 32));
++      return result;
++    }
++
++    public int compareTo(YearMonthKey o) {
++      int thisValue = 100 * this.year + this.month;
++      int thatValue = 100 * o.year + o.month;
++      return thisValue < thatValue ? -1 : (thisValue == thatValue ? 0 : 1);
++    }
++
++    public String toString() {
++      return this.year + " " + this.month;
++    }
++  }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment1/BookAndAuthorBroadcastJoin.java b/src/main/java/de/tuberlin/dima/aim3/assignment1/BookAndAuthorBroadcastJoin.java
+index 0de1448..c1439d1 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment1/BookAndAuthorBroadcastJoin.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment1/BookAndAuthorBroadcastJoin.java
+@@ -19,12 +19,26 @@
+ package de.tuberlin.dima.aim3.assignment1;
+ 
+ import de.tuberlin.dima.aim3.HadoopJob;
++import org.apache.hadoop.filecache.DistributedCache;
++import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
++import org.apache.hadoop.io.NullWritable;
++import org.apache.hadoop.io.Text;
++import org.apache.hadoop.mapreduce.Job;
++import org.apache.hadoop.mapreduce.Mapper;
++import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
++import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
+ 
++import java.io.BufferedReader;
++import java.io.FileReader;
++import java.io.IOException;
++import java.util.Hashtable;
+ import java.util.Map;
+ 
+ public class BookAndAuthorBroadcastJoin extends HadoopJob {
+ 
++  public static final String FILE_NAME_AUTHORS = "authors.tsv";
++
+   @Override
+   public int run(String[] args) throws Exception {
+ 
+@@ -34,9 +48,71 @@ public class BookAndAuthorBroadcastJoin extends HadoopJob {
+     Path books = new Path(parsedArgs.get("--books"));
+     Path outputPath = new Path(parsedArgs.get("--output"));
+ 
+-    //IMPLEMENT ME
++    Job booksAndAuthors = prepareJob(books,
++            outputPath, TextInputFormat.class,
++            BooksAndAuthorsBroadcastJoinMapper.class, Text.class, Text.class,
++            TextOutputFormat.class);
++
++    DistributedCache.addFileToClassPath(authors, booksAndAuthors.getConfiguration(),
++            FileSystem.get(booksAndAuthors.getConfiguration()));
++
++    booksAndAuthors.waitForCompletion(true);
+ 
+     return 0;
+   }
+ 
++  static class BooksAndAuthorsBroadcastJoinMapper extends Mapper<Object, Text, NullWritable, Text> {
++
++    // hash map to hold smaller dataset in memory
++    private Hashtable<Integer, String> htAuthors;
++
++    @Override
++    protected void setup(Context context) throws IOException, InterruptedException {
++      super.setup(context);
++
++      // step 1: load the smaller dataset into memory (here: authors)
++      htAuthors = new Hashtable<Integer, String>();
++      BufferedReader br =  null ;
++      String lineAuthor =  null;
++      Path[] authorsArray = DistributedCache.getLocalCacheFiles(context.getConfiguration());
++      Path authors = null;
++      for(Path a: authorsArray) {
++        if(a.getName().equals(FILE_NAME_AUTHORS)) {
++          authors = authorsArray[0];
++        }
++      }
++      if(authors == null) {
++        throw new InterruptedException("Join file authors.tsv not in distributed cache.");
++      }
++
++      try {
++        br = new BufferedReader(new FileReader(authors.getParent() + "/" + authors.getName()));
++        while ((lineAuthor = br.readLine()) != null) {
++          String record[] = lineAuthor.split("\t");
++          if(record.length == 2)  {
++            //Insert into hash table for easy lookup
++            htAuthors.put(Integer.valueOf(record[0]), record[1]);
++          }
++        }
++      }
++      catch (Exception ex)  {
++        ex.printStackTrace();
++      }
++    }
++
++    @Override
++    protected void map(Object key, Text lineBook, Context ctx) throws IOException, InterruptedException {
++
++      // step 2: read the bigger dataset using map reduce
++      String[] values = lineBook.toString().split("\\t");
++      if(values.length == 3) {
++        // step 3: map smaller dataset to bigger dataset by join key
++        String author = htAuthors.get(Integer.valueOf(values[0]));
++        if(author != null || !author.isEmpty()) {
++          // write output (author|tab|nameofbook|tab|yearofpublication)
++          ctx.write(NullWritable.get(), new Text(author + "\t" + values[2] + "\t" + values[1]));
++        }
++      }
++    }
++  }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment1/BookAndAuthorReduceSideJoin.java b/src/main/java/de/tuberlin/dima/aim3/assignment1/BookAndAuthorReduceSideJoin.java
+index bc41d5f..e88193b 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment1/BookAndAuthorReduceSideJoin.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment1/BookAndAuthorReduceSideJoin.java
+@@ -19,8 +19,20 @@
+ package de.tuberlin.dima.aim3.assignment1;
+ 
+ import de.tuberlin.dima.aim3.HadoopJob;
++import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.Path;
++import org.apache.hadoop.io.*;
++import org.apache.hadoop.mapreduce.Job;
++import org.apache.hadoop.mapreduce.Mapper;
++import org.apache.hadoop.mapreduce.Partitioner;
++import org.apache.hadoop.mapreduce.Reducer;
++import org.apache.hadoop.mapreduce.lib.input.FileSplit;
++import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
++import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
+ 
++import java.io.DataInput;
++import java.io.DataOutput;
++import java.io.IOException;
+ import java.util.Map;
+ 
+ public class BookAndAuthorReduceSideJoin extends HadoopJob {
+@@ -34,8 +46,223 @@ public class BookAndAuthorReduceSideJoin extends HadoopJob {
+     Path books = new Path(parsedArgs.get("--books"));
+     Path outputPath = new Path(parsedArgs.get("--output"));
+ 
+-    // IMPLEMENT ME
++    Path inputPaths = new Path(books.toString() + "," + authors.toString());
++
++    Job booksAndAuthors = prepareJob(inputPaths, outputPath, TextInputFormat.class,
++            BooksAndAuthorsRSJMapper.class, TaggedKey.class, TaggedValue.class,
++            BooksAndAuthorsRSJReducer.class, TaggedKey.class, TaggedValue.class,
++            TextOutputFormat.class);
++    // set custom partitioner
++    booksAndAuthors.setPartitionerClass(BooksAndAuthorsRSJPartitioner.class);
++    // set custom group comparator
++    booksAndAuthors.setGroupingComparatorClass(BooksAndAuthorsRSJComparator.class);
++
++    // set the mapping of data origin and tags in configuration
++    // this should be done dynamically by configuring the run configuration
++    Configuration conf = booksAndAuthors.getConfiguration();
++    conf.setInt("authors", 1);
++    conf.setInt("books", 2);
++
++    booksAndAuthors.waitForCompletion(true);
+ 
+     return 0;
+   }
++
++  static class BooksAndAuthorsRSJMapper extends Mapper<Object, Text, TaggedKey, TaggedValue> {
++
++    public static final String TAG_BOOKS = "books";
++    public static final String TAG_AUTHORS = "authors";
++
++    @Override
++    protected void map(Object key, Text values, Context ctx) throws IOException, InterruptedException {
++
++      // Get the origin of the data using file split for appropriate tagging
++      FileSplit fsFileSplit = (FileSplit) ctx.getInputSplit();
++      String file = fsFileSplit.getPath().getName();
++      String origin = file.substring(0, file.indexOf(".tsv"));
++
++      if(!origin.equals(TAG_AUTHORS) && !origin.equals(TAG_BOOKS)) {
++        // if the origin (tag) does not match, the data can not be
++        // processed according to the implementation
++        return;
++      }
++
++      // get the tag for origin table from config
++      int tag = Integer.parseInt(ctx.getConfiguration().get(origin));
++
++      // split the input
++      String[] record = values.toString().split("\t");
++
++      // tag the input by its origin and pre-process rows
++      if(tag == 1) {
++        ctx.write(new TaggedKey(Integer.valueOf(record[0]), tag), new TaggedValue(record[1], tag));
++      } else if(tag == 2) {
++        ctx.write(new TaggedKey(Integer.valueOf(record[0]), tag), new TaggedValue(record[2] + "\t" + record[1], tag));
++      }
++    }
++  }
++
++  static class BooksAndAuthorsRSJReducer extends Reducer<TaggedKey, TaggedValue, NullWritable, Text> {
++
++    @Override
++    protected void reduce(TaggedKey key, Iterable<TaggedValue> values, Context ctx)
++            throws IOException, InterruptedException {
++      // Values with the same join key are provided to the same reducer
++      Text author = null;
++      // Using secondary sort the vales are ordered by the following:
++      // 1. authors, 2. books; hence, the key contains the tag for the author table
++      // hence, the row of the author table comes in first followed by the book table data
++      IntWritable tag = new IntWritable(key.getTag().get());
++      for(TaggedValue value: values ) {
++        if(value.getTag().equals(tag)) {
++          author = new Text(value.getValue());
++        } else {
++          ctx.write(NullWritable.get(), new Text(author + "\t" + value.getValue()));
++        }
++      }
++    }
++  }
++
++  /**
++   * Custom key for reduce side joins.
++   * It contains the join key and a tag. The join key is the primary / secondary key
++   * which is used to join two tables. The tag holds information about the origin
++   * of the data.
++   * The custom partitioner / group comparator will assign the records with the
++   * same join key to the same reducer. The tag is used to identify the origin of
++   * the data.
++   * Secondary sort in compareTo ensures, that the tagged key of the left table (authors)
++   * appears in the reducer
++   */
++  static class TaggedKey implements WritableComparable<TaggedKey> {
++
++    private IntWritable key = new IntWritable();
++    private IntWritable tag = new IntWritable();
++
++    public TaggedKey() {
++    }
++
++    public TaggedKey(int key, int tag) {
++      this.key = new IntWritable(key);
++      this.tag = new IntWritable(tag);
++    }
++
++    public IntWritable getKey() {
++      return key;
++    }
++
++    public IntWritable getTag() {
++      return tag;
++    }
++
++    @Override
++    public int compareTo(TaggedKey other) {
++      int compareValue = this.key.compareTo(other.getKey());
++      if(compareValue == 0 ){
++        compareValue = this.tag.compareTo(other.getTag());
++      }
++      return compareValue;
++    }
++
++    @Override
++    public void readFields(DataInput in) throws IOException {
++      key.readFields(in);
++      tag.readFields(in);
++    }
++
++    @Override
++    public void write(DataOutput out) throws IOException {
++      key.write(out);
++      tag.write(out);
++    }
++  }
++
++  /**
++   * Custom value for reduce side joins.
++   * It contains a value and a tag. The value represents a data row of the origin table.
++   * The tag holds information about the origin of the data. Using this information the
++   * values can be joint in the reducer in respect of the same join key.
++   *
++   * Using secondary sort in compareTo ensures that the values appear by defined order
++   * in reduce.
++   */
++  static class TaggedValue implements WritableComparable<TaggedValue> {
++
++    private Text value = new Text();
++    private IntWritable tag = new IntWritable();
++
++    public TaggedValue() {
++    }
++
++    public TaggedValue(String value, int tag) {
++      this.value = new Text(value);
++      this.tag = new IntWritable(tag);
++    }
++
++    public Text getValue() {
++      return value;
++    }
++
++    public IntWritable getTag() {
++      return tag;
++    }
++
++    @Override
++    public int compareTo(TaggedValue other) {
++      int compareValue = this.value.compareTo(other.getValue());
++      if(compareValue == 0 ){
++        compareValue = this.tag.compareTo(other.getTag());
++      }
++      return compareValue;
++    }
++
++    @Override
++    public void readFields(DataInput in) throws IOException {
++      value.readFields(in);
++      tag.readFields(in);
++    }
++
++    @Override
++    public void write(DataOutput out) throws IOException {
++      value.write(out);
++      tag.write(out);
++    }
++  }
++
++  /**
++   * BooksAndAuthorsRSJPartitioner is a custom partitioner which
++   * partitions the output of the map only by the key itself. This
++   * results in assigning the data with the same join key to the same
++   * reducer. There the data are joined.
++   *
++   * The key is the join key.
++   * The tag is not considered at this point.
++   */
++  static class BooksAndAuthorsRSJPartitioner extends Partitioner<TaggedKey, TaggedValue> {
++
++    @Override
++    public int getPartition(TaggedKey key, TaggedValue value, int numPartitions) {
++      return key.getKey().hashCode() % numPartitions;
++    }
++  }
++
++  /**
++   * BooksAndAuthorsRSJComparator is a custom group by comparator which
++   * groups the output of the map only by the key itself.
++   * The key is the join key.
++   * The tag is not considered at this point.
++   */
++  static class BooksAndAuthorsRSJComparator extends WritableComparator {
++
++    public BooksAndAuthorsRSJComparator() {
++      super(TaggedKey.class, true);
++    }
++
++    @Override
++    public int compare(WritableComparable a, WritableComparable b) {
++      TaggedKey key1 = (TaggedKey)a;
++      TaggedKey key2 = (TaggedKey)b;
++      return key1.getKey().compareTo(key2.getKey());
++    }
++  }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment1/FilteringWordCount.java b/src/main/java/de/tuberlin/dima/aim3/assignment1/FilteringWordCount.java
+index 2ad6bb6..8d463f2 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment1/FilteringWordCount.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment1/FilteringWordCount.java
+@@ -21,6 +21,7 @@ package de.tuberlin.dima.aim3.assignment1;
+ import de.tuberlin.dima.aim3.HadoopJob;
+ import org.apache.hadoop.fs.Path;
+ import org.apache.hadoop.io.IntWritable;
++import org.apache.hadoop.io.NullWritable;
+ import org.apache.hadoop.io.Text;
+ import org.apache.hadoop.mapreduce.Job;
+ import org.apache.hadoop.mapreduce.Mapper;
+@@ -29,7 +30,10 @@ import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
+ import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
+ 
+ import java.io.IOException;
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.Map;
++import java.util.regex.Pattern;
+ 
+ public class FilteringWordCount extends HadoopJob {
+ 
+@@ -40,25 +44,62 @@ public class FilteringWordCount extends HadoopJob {
+     Path inputPath = new Path(parsedArgs.get("--input"));
+     Path outputPath = new Path(parsedArgs.get("--output"));
+ 
+-    Job wordCount = prepareJob(inputPath, outputPath, TextInputFormat.class, FilteringWordCountMapper.class,
+-        Text.class, IntWritable.class, WordCountReducer.class, Text.class, IntWritable.class, TextOutputFormat.class);
++    Job wordCount = prepareJob(inputPath, outputPath, TextInputFormat.class,
++            FilteringWordCountMapper.class, Text.class, IntWritable.class,
++            WordCountReducer.class, Text.class, IntWritable.class,
++            TextOutputFormat.class);
+     wordCount.waitForCompletion(true);
+ 
+     return 0;
+   }
+ 
+-  static class FilteringWordCountMapper extends Mapper<Object,Text,Text,IntWritable> {
++  static class FilteringWordCountMapper extends Mapper<Object, Text, Text, IntWritable> {
++
++    // pattern to split lines on
++    // this pattern also takes care of punctuation. Only words are extracted
++    private static final Pattern WORD_BOUNDARY = Pattern.compile("\\s*\\b\\s*");
++
++    // blacklist contains words which should not be considered in the count
++    private static final List<String> blackList = new ArrayList<String>(){{
++      add("to");
++      add("and");
++      add("in");
++      add("the");
++    }};
++
++    // static int writable for the counting of words
++    private final static IntWritable one = new IntWritable(1);
++
+     @Override
+     protected void map(Object key, Text line, Context ctx) throws IOException, InterruptedException {
+-      // IMPLEMENT ME
++      // split the text line by the predefined pattern into single words
++      String[] wordArray = WORD_BOUNDARY.split(line.toString());
++
++      for(String word: wordArray) {
++        // all words are considered in lower case
++        word = word.toLowerCase();
++        if(!blackList.contains(word)) {
++          // word is not contained in blacklist
++          // --> map it to 1
++          ctx.write(new Text(word), one);
++        }
++      }
+     }
+   }
+ 
+-  static class WordCountReducer extends Reducer<Text,IntWritable,Text,IntWritable> {
++  static class WordCountReducer extends Reducer<Text, IntWritable, NullWritable, Text> {;
++
+     @Override
+     protected void reduce(Text key, Iterable<IntWritable> values, Context ctx)
+-        throws IOException, InterruptedException {
+-      // IMPLEMENT ME
++            throws IOException, InterruptedException {
++      // the count for the unique words
++      int count = 0;
++      // sum up all 1s for each unique word
++      for (IntWritable val : values) {
++        count += val.get();
++      }
++      // generate the output (word|tab|count)
++      ctx.write(NullWritable.get(), new Text(key + "\t" + count));
+     }
+   }
+ 
+diff --git a/src/main/java/de/tuberlin/dima/aim3/assignment1/PrimeNumbersWritable.java b/src/main/java/de/tuberlin/dima/aim3/assignment1/PrimeNumbersWritable.java
+index 527801f..176299b 100644
+--- a/src/main/java/de/tuberlin/dima/aim3/assignment1/PrimeNumbersWritable.java
++++ b/src/main/java/de/tuberlin/dima/aim3/assignment1/PrimeNumbersWritable.java
+@@ -39,12 +39,31 @@ public class PrimeNumbersWritable implements Writable {
+ 
+   @Override
+   public void write(DataOutput out) throws IOException {
+-    //IMPLEMENT ME
++    // create a comma separated list of all integer in array
++    StringBuffer sb = new StringBuffer();
++    String separator = "";
++    for(int n: numbers) {
++      sb.append(separator);
++      sb.append(n);
++      separator = ",";
++    }
++    // append newline to read back as line
++    sb.append("\n");
++    // write the string as bytes
++    out.write(sb.toString().getBytes());
+   }
+ 
+   @Override
+   public void readFields(DataInput in) throws IOException {
+-    //IMPLEMENT ME
++    // read the line of comma separated integer
++    String line = in.readLine();
++    // split by the separator
++    String[] sNumbers = line.split(",");
++    // transform to integer array
++    numbers = new int[sNumbers.length];
++    for(int i = 0; i < sNumbers.length; i++) {
++      numbers[i] = Integer.valueOf(sNumbers[i]);
++    }
+   }
+ 
+   @Override
+-- 
+1.9.1
+
